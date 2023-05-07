@@ -140,18 +140,7 @@ func ContainsFunc[E any](s []E, f func(E) bool) bool {
 // Insert panics if i is out of range.
 // This function is O(len(s) + len(v)).
 func Insert[S ~[]E, E any](s S, i int, v ...E) S {
-	tot := len(s) + len(v)
-	if tot <= cap(s) {
-		s2 := s[:tot]
-		copy(s2[i+len(v):], s[i:])
-		copy(s2[i:], v)
-		return s2
-	}
-	s2 := make(S, tot)
-	copy(s2, s[:i])
-	copy(s2[i:], v)
-	copy(s2[i+len(v):], s[i:])
-	return s2
+	return Replace(s, i, i, v)
 }
 
 // Delete removes the elements s[i:j] from s, returning the modified slice.
@@ -160,12 +149,32 @@ func Insert[S ~[]E, E any](s S, i int, v ...E) S {
 // Delete is O(len(s)-j), so if many items must be deleted, it is better to
 // make a single call deleting them all together than to delete one at a time.
 // Delete might not modify the elements s[len(s)-(j-i):len(s)]. If those
-// elements contain pointers you might consider zeroing those elements so that
-// objects they reference can be garbage collected.
+// elements contain pointers you might consider zeroing those elements (e.g.
+// with ClearUnused) so that objects they reference can be garbage collected.
 func Delete[S ~[]E, E any](s S, i, j int) S {
 	_ = s[i:j] // bounds check
-
 	return append(s[:i], s[j:]...)
+}
+
+func DeleteFunc[S ~[]E, E any](s S, f func(int, E) bool) S {
+	var j int
+	for i, e := range s {
+		if f(i, e) {
+			goto deleted
+		}
+		j++
+	}
+	return s
+deleted:
+	off := j+1
+	for i, e := range s[off:] {
+		if f(i+off, e) {
+			continue
+		}
+		s[j] = e
+		j++
+	}
+	return s[:j]
 }
 
 // Replace replaces the elements s[i:j] by the given v, and returns the
@@ -243,16 +252,38 @@ func Grow[S ~[]E, E any](s S, n int) S {
 	if n < 0 {
 		panic("cannot be negative")
 	}
-	if n -= cap(s) - len(s); n > 0 {
-		// TODO(https://go.dev/issue/53888): Make using []E instead of S
-		// to workaround a compiler bug where the runtime.growslice optimization
-		// does not take effect. Revert when the compiler is fixed.
-		s = append([]E(s)[:cap(s)], make([]E, n)...)[:len(s)]
+	if n > cap(s) - len(s) {
+		s = append(s, make(S, n)...)[:len(s)]
 	}
 	return s
+}
+
+func Make[S ~[]E, E any](l int) S {
+	return MakeCap(l, l)
+}
+
+func MakeCap[S ~[]E, E any](l, c int) S {
+	if l < 0 {
+		panic("length cannot be negative")
+	}
+	if c < l {
+		c = l
+	}
+	return append(S(nil), make(S, c)...)[:l]
 }
 
 // Clip removes unused capacity from the slice, returning s[:len(s):len(s)].
 func Clip[S ~[]E, E any](s S) S {
 	return s[:len(s):len(s)]
+}
+
+func Clear[S ~[]E, E any](s S) {
+	for i := range s {
+		var zero E
+		s[i] = zero
+	}
+}
+
+func ClearUnused[S ~[]E, E any](s S) {
+	Clear(s[len(s):cap(s)])
 }
